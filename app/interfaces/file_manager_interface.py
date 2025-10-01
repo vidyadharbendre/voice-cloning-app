@@ -1,13 +1,30 @@
+# ================================
+# FILE: app/interfaces/file_manager_interface.py
+# ================================
+
 from abc import ABC, abstractmethod
-from pathlib import Path
+from typing import Optional
+from fastapi import UploadFile
 
-
-class FileManagerInterface(ABC):
+class IFileManager(ABC):
+    """Interface for file management operations"""
+    
     @abstractmethod
-    def save(self, src: Path, dest_name: str) -> str:
-        """Save file to storage and return URL/path."""
-        raise NotImplementedError
-
+    async def save_upload(self, file: UploadFile) -> str:
+        """Save uploaded file and return file ID"""
+        pass
+    
     @abstractmethod
-    def get(self, name: str) -> Path:
-        raise NotImplementedError
+    async def get_file_path(self, file_id: str) -> Optional[str]:
+        """Get file path by ID"""
+        pass
+    
+    @abstractmethod
+    async def delete_file(self, file_id: str) -> bool:
+        """Delete file by ID"""
+        pass
+    
+    @abstractmethod
+    async def cleanup_old_files(self, max_age_hours: int = 24) -> int:
+        """Clean up old files and return number of deleted files"""
+        pass

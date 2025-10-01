@@ -1,0 +1,71 @@
+# ================================
+# FILE: monitoring/grafana-dashboard.json
+# ================================
+
+{
+  "dashboard": {
+    "id": null,
+    "title": "Voice Cloning API Dashboard",
+    "tags": ["voice-cloning", "api"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(requests_total[5m])",
+            "legendFormat": "Requests/sec"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(errors_total[5m])",
+            "legendFormat": "Errors/sec"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg_response_time",
+            "legendFormat": "Avg Response Time"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "System Resources",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "cpu_percent",
+            "legendFormat": "CPU %"
+          },
+          {
+            "expr": "memory_percent",
+            "legendFormat": "Memory %"
+          },
+          {
+            "expr": "gpu_usage",
+            "legendFormat": "GPU %"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "5s"
+  }
+}

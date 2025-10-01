@@ -1,8 +1,27 @@
-version: "3.8"
+# ================================
+# FILE: docker/docker-compose.yml
+# ================================
+
+version: '3.8'
+
 services:
-  app:
-    build: ./docker
+  voice-cloning-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     ports:
       - "8000:8000"
     volumes:
-      - ./:/app
+      - ../uploads:/app/uploads
+      - ../outputs:/app/outputs
+    environment:
+      - DEBUG=false
+      - USE_GPU=false  # Set to true if GPU available
+    restart: unless-stopped
+
+  # Optional: Redis for caching (future enhancement)
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

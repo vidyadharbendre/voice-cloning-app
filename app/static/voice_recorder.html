@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Voice Profile Recorder</title>
+    <style>
+        /* Styles kept compact for brevity (same look & feel as your previous file) */
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width:800px; margin:0 auto; padding:20px; background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); min-height:100vh; color:white;}
+        .container { background: rgba(255,255,255,0.1); padding:30px; border-radius:15px; backdrop-filter: blur(10px); box-shadow: 0 8px 32px rgba(31,38,135,0.37); border:1px solid rgba(255,255,255,0.18); }
+        .text-input{ width:100%; padding:15px; border:none; border-radius:8px; background: rgba(255,255,255,0.1); color:white; font-size:16px; margin:10px 0;}
+        .record-button{ background: linear-gradient(45deg,#FF6B6B,#FF8E53); border:none; color:white; padding:12px 22px; font-size:16px; border-radius:50px; cursor:pointer; margin:6px;}
+        .record-button:disabled{ background:#666; cursor:not-allowed; }
+        .prompt-text{ font-size:1.1em; margin:12px 0; padding:12px; background: rgba(255,255,255,0.06); border-radius:8px; border-left:4px solid #2196F3; font-style:italic;}
+        .status{ text-align:center; font-size:1.02em; margin:12px 0; padding:10px; border-radius:5px; display:block;}
+        .status.info{ background: rgba(33,150,243,0.12); color:#eaf6ff;}
+        .status.success{ background: rgba(76,175,80,0.12); color:#f0fff0;}
+        .status.error{ background: rgba(244,67,54,0.12); color:#fff0f0;}
+        .controls { text-align:center; margin-top:10px; }
+        #promptCountdown { margin-top:6px; font-size:0.95rem; opacity:0.95; text-align:center; }
+        audio { outline: none; width:100%; }
+        label { display:block; margin-top:8px; font-size:0.95rem; color: #f7f7f7; }
+        small { color:#e6e6e6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 Voice Profile Creator</h1>
+            <p>Create your personal voice profile for AI cloning</p>
+        </div>
+
+        <!-- Recording Section -->
+        <div id="recordingSection">
+            <div class="step-container" aria-labelledby="create-voice-heading">
+                <h3 id="create-voice-heading">Step 1: Create Voice Profile</h3>
+                <label for="profileName">Voice profile name</label>
+                <input type="text" id="profileName" aria-required="true" placeholder="Enter voice profile name" class="text-input" />
+                <label for="profileDescription">Description (optional)</label>
+                <input type="text" id="profileDescription" placeholder="Description (optional)" class="text-input" />
+
+                <div class="controls">
+                    <button id="startRecordingBtn" class="record-button" type="button">Start Voice Recording Session</button>
+                </div>
+            </div>
+
+            <div id="recordingSteps" style="display:none;">
+                <div class="step-container">
+                    <h3>Recording Progress</h3>
+                    <div class="progress-bar" style="width:100%; height:14px; background:rgba(255,255,255,0.08); border-radius:10px; overflow:hidden; margin:12px 0;">
+                        <div id="progressFill" class="progress-fill" style="width:0%; height:100%; background:linear-gradient(90deg,#4CAF50,#45a049);"></div>
+                    </div>
+                    <p id="progressText">Step 0 of 10</p>
+
+                    <div id="currentPrompt" class="prompt-text" aria-live="polite">Ready to start recording...</div>
+                    <div id="promptCountdown" aria-live="polite"></div>
+
+                    <div class="controls">
+                        <button id="recordBtn" class="record-button" disabled type="button">🎤 Record</button>
+                        <button id="stopBtn" class="record-button" disabled type="button">⏹️ Stop</button>
+                        <button id="playBtn" class="record-button" disabled type="button">▶️ Play</button>
+                        <button id="submitBtn" class="record-button" disabled type="button">✅ Submit</button>
+                    </div>
+
+                    <audio id="audioPlayback" controls style="display:none;"></audio>
+
+                    <div id="recordingStatus" class="status info" role="status" aria-live="polite">Ready to record your voice</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Profiles & synthesis sections -->
+        <div class="voice-profiles" style="margin-top:18px;">
+            <h3>📚 Your Voice Profiles</h3>
+            <div id="profilesList"><p>Loading your voice profiles...</p></div>
+            <div class="controls"><button id="refreshProfilesBtn" class="record-button" type="button">🔄 Refresh Profiles</button></div>
+        </div>
+
+        <div class="synthesis-section" style="margin-top:18px;">
+            <h3>🎯 Use Your Voice</h3>
+            <label for="voiceSelect">Choose a ready voice</label>
+            <select id="voiceSelect" class="text-input" aria-label="Select a voice profile"><option value="">Select a voice profile...</option></select>
+            <label for="synthesisText">Text to synthesize</label>
+            <textarea id="synthesisText" class="text-input" placeholder="Enter text to synthesize..." rows="3"></textarea>
+            <div class="controls"><button id="synthesizeBtn" class="record-button" type="button">🎵 Generate Speech</button></div>
+            <audio id="synthesisResult" controls style="display:none; width:100%; margin-top:10px;"></audio>
+            <div id="synthesisStatus" class="status info" style="display:none;" role="status" aria-live="polite"></div>
+        </div>
+    </div>
+
+<script>
+/*
+Production-minded update:
+- fetchWithFallback supports per-attempt timeout via AbortController
+- Every request sends X-Correlation-ID for traceability
+- Improved error parsing & structured console.debug
+- Accessibility labels + aria-live status regions are added
+- Toggle AUTO_SUBMIT_AFTER_RECORD to automatically submit when recordings auto-stop
+*/
+
+class VoiceProfileRecorder {
+    constructor() {
+        // config
+        this.API_START_RECORDING_URLS = [
+            '/api/v1/voice-profiles/profiles/start-recording',
+            '/api/v1/profiles/start-recording'
+        ];
+        this.API_SUBMIT_RECORDING_URLS = [
+            '/api/v1/voice-profiles/profiles/submit-recording',
+            '/api/v1/profiles/submit-recording'
+        ];
+        this.API_LIST_PROFILES_URLS = [
+            '/api/v1/voice-profiles/profiles',
+            '/api/v1/profiles'
+        ];
+        this.API_USE_VOICE_URLS = [
+            '/api/v1/voice-profiles/profiles/use-voice',
+            '/api/v1/profiles/use-voice'
+        ];
+        this.API_DELETE_PROFILE_URLS = [
+            '/api/v1/voice-profiles', // will append /:id
+            '/api/v1/profiles'
+        ];
+        this.DEFAULT_PROMPT_DURATION = 6;         // seconds
+        this.AUTO_SUBMIT_AFTER_RECORD = false;    // set true if you want auto-submit after auto-stop
+        this.FETCH_TIMEOUT_MS = 25_000;           // default fetch timeout (25s)
+        this.MAX_FETCH_RETRIES = 1;               // number of fallback URL attempts (your list controls attempts)
+
+        // state
+        this.mediaRecorder = null;
+        this.audioChunks = [];
+        this.recordedBlob = null;
+        this.currentSession = null;
+        this.currentStep = 1;
+        this.isRecording = false;
+
+        // timers
+        this.recordStartTs = null;
+        this.recordTimerInterval = null;
+        this.countdownInterval = null;
+        this.autoStopTimeout = null;
+        this.countdownRemaining = null;
+
+        // correlation id (persisted to help connect front/back logs)
+        this.correlationId = this.ensureCorrelationId();
+
+        // init
+        this.binds();
+        this.initUIState();
+        this.addEventListeners();
+
+        // initial population
+        this.populateMicList();
+        this.loadUserProfiles();
+    }
+
+    // ---- bindings ----
+    binds() {
+        this.startRecordingSession = this.startRecordingSession.bind(this);
+        this.startRecording = this.startRecording.bind(this);
+        this.stopRecording = this.stopRecording.bind(this);
+        this.submitRecording = this.submitRecording.bind(this);
+        this.playRecording = this.playRecording.bind(this);
+        this.populateMicList = this.populateMicList.bind(this);
+        this.loadUserProfiles = this.loadUserProfiles.bind(this);
+    }
+
+    // ---- utils ----
+    ensureCorrelationId() {
+        let id = localStorage.getItem('correlationId');
+        if (id) return id;
+        id = 'cid_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+        localStorage.setItem('correlationId', id);
+        return id;
+    }
+
+    genHeaders(extra = {}) {
+        const base = {
+            'X-Correlation-ID': this.correlationId,
+            'X-User-ID': this.getUserId()
+        };
+        return Object.assign({}, base, extra);
+    }
+
+    // Fetch with fallback URLs; supports per-attempt timeout via AbortController
+    async fetchWithFallback(urls, options = {}, attemptTimeoutMs = null) {
+        let lastErr = null;
+        const timeout = attemptTimeoutMs || this.FETCH_TIMEOUT_MS;
+        for (const url of urls) {
+            const controller = new AbortController();
+            const signal = controller.signal;
+            let timer = null;
+            try {
+                if (timeout > 0) timer = setTimeout(() => controller.abort(), timeout);
+
+                const opts = Object.assign({}, options, { signal });
+                const resp = await fetch(url, opts);
+                // attach the URL used so caller can log it
+                resp.fetchedUrl = url;
+                // clear timer and return response even if !ok (caller may parse body)
+                if (timer) { clearTimeout(timer); timer = null; }
+                return resp;
+            } catch (err) {
+                if (timer) { clearTimeout(timer); timer = null; }
+                console.debug({ event: 'fetch-fallback-attempt-failed', url, err, correlationId: this.correlationId });
+                lastErr = err;
+                // continue to next fallback url
+            }
+        }
+        // if none worked, throw the last error
+        throw lastErr || new Error('All fetch attempts failed');
+    }
+
+    // ---- UI init ----
+    initUIState() {
+        ['recordBtn','stopBtn','playBtn','submitBtn'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = true;
+        });
+    }
+
+    addEventListeners() {
+        document.getElementById('startRecordingBtn')?.addEventListener('click', this.startRecordingSession);
+        document.getElementById('recordBtn')?.addEventListener('click', this.startRecording);
+        document.getElementById('stopBtn')?.addEventListener('click', this.stopRecording);
+        document.getElementById('playBtn')?.addEventListener('click', this.playRecording);
+        document.getElementById('submitBtn')?.addEventListener('click', this.submitRecording);
+        document.getElementById('refreshProfilesBtn')?.addEventListener('click', this.loadUserProfiles);
+        document.getElementById('synthesizeBtn')?.addEventListener('click', () => this.synthesizeWithVoice());
+    }
+
+    // ---- microphone enumeration & selection ----
+    async populateMicList() {
+        const container = document.querySelector('.step-container');
+        if (!container) return;
+
+        if (!document.getElementById('micSelect')) {
+            const label = document.createElement('label');
+            label.setAttribute('for', 'micSelect');
+            label.innerText = 'Choose microphone (optional):';
+            label.style.display = 'block';
+            label.style.marginTop = '10px';
+
+            const select = document.createElement('select');
+            select.id = 'micSelect';
+            select.className = 'text-input';
+            select.innerHTML = '<option value="">(Default system mic)</option>';
+            const controls = container.querySelector('.controls');
+            container.insertBefore(label, controls);
+            container.insertBefore(select, controls);
+        }
+        const select = document.getElementById('micSelect');
+
+        // quick permission check (graceful if user denies)
+        try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); } catch(e) { /* ignore */ }
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            while (select.options.length > 1) select.remove(1);
+            const saved = localStorage.getItem('preferredMicId') || '';
+            let foundSaved = false;
+            devices.forEach(dev => {
+                if (dev.kind === 'audioinput') {
+                    const opt = document.createElement('option');
+                    opt.value = dev.deviceId;
+                    opt.text = dev.label || `Microphone (${dev.deviceId.substring(0,6)})`;
+                    select.appendChild(opt);
+                    if (saved && dev.deviceId === saved) foundSaved = true;
+                }
+            });
+            if (saved && foundSaved) select.value = saved;
+            else if (saved) localStorage.removeItem('preferredMicId');
+            select.addEventListener('change', () => {
+                if (select.value) localStorage.setItem('preferredMicId', select.value);
+                else localStorage.removeItem('preferredMicId');
+            });
+        } catch (err) {
+            console.warn('Could not enumerate devices', err);
+            // leave micSelect with only default option
+        }
+    }
+
+    getSelectedMic() {
+        const sel = document.getElementById('micSelect');
+        if (sel && sel.value) return sel.value;
+        return localStorage.getItem('preferredMicId') || null;
+    }
+
+    // ---- start-recording session ----
+    async startRecordingSession() {
+        const profileName = document.getElementById('profileName')?.value?.trim();
+        if (!profileName) { this.showStatus('recordingStatus', 'Please enter a profile name', 'error'); return; }
+        this.showStatus('recordingStatus', 'Starting session...', 'info');
+
+        try {
+            const body = {
+                profile_name: profileName,
+                description: document.getElementById('profileDescription')?.value || '',
+                total_steps: 10
+            };
+
+            const resp = await this.fetchWithFallback(this.API_START_RECORDING_URLS, {
+                method: 'POST',
+                headers: this.genHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }),
+                redirect: 'manual',
+                body: JSON.stringify(body)
+            }, 20_000 /* 20s timeout for start session */);
+
+            // handle redirect responses (some servers may 303)
+            if (resp.status === 303 || resp.type === 'opaqueredirect') {
+                console.debug({ event: 'start-session-redirect', fetchedUrl: resp.fetchedUrl, correlationId: this.correlationId });
+                window.location.href = '/voice-recorder';
+                return;
+            }
+
+            const contentType = (resp.headers.get('Content-Type') || '').toLowerCase();
+            let data = null;
+            try {
+                if (contentType.includes('application/json')) data = await resp.json();
+                else data = await resp.json().catch(async () => ({ raw: await resp.text() }));
+            } catch (e) {
+                data = { raw: await resp.text().catch(()=>null) };
+            }
+
+            console.debug({ event: 'startRecordingSession:response', status: resp.status, fetchedUrl: resp.fetchedUrl, body: data, correlationId: this.correlationId });
+
+            if (!resp.ok) {
+                const msg = (data && data.message) ? data.message : `Failed to start session (status ${resp.status})`;
+                this.showStatus('recordingStatus', msg, 'error');
+                return;
+            }
+
+            // normalize success shapes
+            if (data && (data.success === true || data.profile_id || data.next_prompt)) {
+                this.currentSession = data;
+                this.currentStep = data.current_step || 1;
+                if (!this.currentSession.profile_id) {
+                    console.warn('startRecordingSession: server response missing profile_id', data);
+                    this.showStatus('recordingStatus', 'Warning: session started (profile_id missing)', 'info');
+                }
+
+                this.showRecordingSteps();
+                this.updatePrompt(data.next_prompt || data.prompt || 'Please read the prompt aloud.');
+                this.updateProgress(data.progress_percentage || 0);
+                this.showStatus('recordingStatus', 'Recording session started!', 'success');
+            } else {
+                this.showStatus('recordingStatus', data?.message || 'Failed to start recording session', 'error');
+            }
+        } catch (err) {
+            console.error({ event: 'startRecordingSession:error', err, correlationId: this.correlationId });
+            if (err && err.name === 'AbortError') this.showStatus('recordingStatus', 'Start session timed out', 'error');
+            else this.showStatus('recordingStatus', 'Failed to start recording session (network)', 'error');
+        }
+    }
+
+    // ---- recording timers & countdown ----
+    startRecordingTimer() {
+        this.recordStartTs = Date.now();
+        const statusEl = document.getElementById('recordingStatus');
+        this.recordTimerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - this.recordStartTs) / 1000);
+            statusEl.textContent = `🔴 Recording — ${elapsed}s`;
+            statusEl.className = 'status info';
+        }, 500);
+    }
+    stopRecordingTimer() {
+        if (this.recordTimerInterval) { clearInterval(this.recordTimerInterval); this.recordTimerInterval = null; this.recordStartTs = null; }
+    }
+
+    startPromptCountdown(durationSec) {
+        this.clearPromptCountdown();
+        const display = document.getElementById('promptCountdown');
+        this.countdownRemaining = Math.max(0, Math.floor(durationSec));
+        if (!display) return;
+        display.textContent = `Auto-stop in ${this.countdownRemaining}s`;
+        this.countdownInterval = setInterval(() => {
+            this.countdownRemaining -= 1;
+            if (this.countdownRemaining <= 0) {
+                display.textContent = `Auto-stopping...`;
+                this.clearPromptCountdown();
+            } else {
+                display.textContent = `Auto-stop in ${this.countdownRemaining}s`;
+            }
+        }, 1000);
+
+        this.autoStopTimeout = setTimeout(async () => {
+            if (this.isRecording) {
+                this.stopRecording();
+                if (this.AUTO_SUBMIT_AFTER_RECORD) {
+                    // small delay to ensure onstop processed
+                    setTimeout(() => this.submitRecording(), 300);
+                }
+            }
+        }, (this.countdownRemaining + 0.25) * 1000);
+    }
+
+    clearPromptCountdown() {
+        if (this.countdownInterval) { clearInterval(this.countdownInterval); this.countdownInterval = null; }
+        if (this.autoStopTimeout) { clearTimeout(this.autoStopTimeout); this.autoStopTimeout = null; }
+        const display = document.getElementById('promptCountdown');
+        if (display) display.textContent = '';
+        this.countdownRemaining = null;
+    }
+
+    // ---- start / stop recording ----
+    async startRecording() {
+        try {
+            const deviceId = this.getSelectedMic();
+            const constraints = deviceId ? { audio: { deviceId: { exact: deviceId } } } : { audio: true };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+            // choose preferred mime type if supported
+            const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : (MediaRecorder.isTypeSupported('audio/wav') ? 'audio/wav' : 'audio/webm');
+
+            this.mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
+            this.audioChunks = [];
+
+            this.mediaRecorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) this.audioChunks.push(ev.data); };
+
+            this.mediaRecorder.onstop = () => {
+                const chunkType = (this.audioChunks[0] && this.audioChunks[0].type) ? this.audioChunks[0].type : mime;
+                this.recordedBlob = new Blob(this.audioChunks, { type: chunkType });
+                this.setupAudioPlayback();
+                try { stream.getTracks().forEach(t => t.stop()); } catch(e) {}
+                this.clearPromptCountdown();
+                this.stopRecordingTimer();
+            };
+
+            this.mediaRecorder.start();
+            this.isRecording = true;
+            this.updateRecordingButtons();
+            this.startRecordingTimer();
+
+            // choose duration: server-provided or default; also parse inline hint like "5 s" in prompt text
+            let duration = this.DEFAULT_PROMPT_DURATION;
+            if (this.currentSession) duration = this.currentSession.step_duration || this.currentSession.prompt_duration || duration;
+            const promptText = (document.getElementById('currentPrompt')?.textContent || '');
+            const match = promptText.match(/(\d{1,2})\s*s(ec(onds)?)?/i);
+            if (match) { const parsed = parseInt(match[1], 10); if (!isNaN(parsed) && parsed > 0) duration = parsed; }
+
+            this.startPromptCountdown(duration);
+            this.showStatus('recordingStatus','🔴 Recording... Read the prompt above clearly!','info');
+        } catch (err) {
+            console.error({ event: 'startRecording:error', err, correlationId: this.correlationId });
+            this.showStatus('recordingStatus', `Failed to access microphone: ${err?.message || err}`, 'error');
+        }
+    }
+
+    stopRecording() {
+        if (this.mediaRecorder && this.isRecording) {
+            this.mediaRecorder.stop();
+            this.isRecording = false;
+            this.updateRecordingButtons();
+            // onstop handler will perform cleanup / playback setup
+        } else {
+            this.clearPromptCountdown();
+            this.stopRecordingTimer();
+        }
+    }
+
+    setupAudioPlayback() {
+        try {
+            const audioEl = document.getElementById('audioPlayback');
+            audioEl.src = URL.createObjectURL(this.recordedBlob);
+            audioEl.style.display = 'block';
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('submitBtn').disabled = false;
+            const sizeKB = Math.round((this.recordedBlob.size / 1024) * 10) / 10;
+            this.showStatus('recordingStatus', `Recorded ${sizeKB} KB — you can play or submit`, 'info');
+        } catch (err) {
+            console.error({ event: 'setupAudioPlayback:error', err, correlationId: this.correlationId });
+            this.showStatus('recordingStatus', 'Playback setup failed', 'error');
+            document.getElementById('submitBtn').disabled = true;
+        }
+    }
+
+    playRecording() {
+        const audioEl = document.getElementById('audioPlayback');
+        if (audioEl && audioEl.src) audioEl.play().catch(e => console.warn('Playback failed', e));
+    }
+
+    // ---- submit (uses fallback URLs) ----
+    async submitRecording() {
+        const submitBtn = document.getElementById('submitBtn');
+        if (!this.recordedBlob || !this.currentSession || !this.currentSession.profile_id) {
+            this.showStatus('recordingStatus', 'No recording or session not started', 'error');
+            return;
+        }
+        submitBtn.disabled = true;
+        this.showStatus('recordingStatus', 'Uploading audio...', 'info');
+
+        try {
+            const formData = new FormData();
+            formData.append('profile_id', this.currentSession.profile_id);
+            formData.append('step_number', (this.currentStep || 1).toString());
+            // ensure filename has extension accepted by server
+            // prefer .webm when blob type contains webm; else fallback to .wav
+            const ext = (this.recordedBlob.type && this.recordedBlob.type.includes('webm')) ? 'webm' : (this.recordedBlob.type && this.recordedBlob.type.includes('wav') ? 'wav' : 'webm');
+            const filename = `profile_${this.currentSession.profile_id}_step_${this.currentStep || 1}.${ext}`;
+            formData.append('audio_file', this.recordedBlob, filename);
+
+            const resp = await this.fetchWithFallback(this.API_SUBMIT_RECORDING_URLS, {
+                method: 'POST',
+                headers: this.genHeaders(), // do NOT set Content-Type for multipart
+                body: formData
+            }, 60_000 /* 60s timeout for uploads */);
+
+            const ct = (resp.headers.get('Content-Type') || '').toLowerCase();
+            let data = null;
+            try {
+                if (ct.includes('application/json')) data = await resp.json();
+                else data = await resp.json().catch(async () => ({ raw: await resp.text() }));
+            } catch (e) {
+                data = { raw: await resp.text().catch(()=>null) };
+            }
+
+            console.debug({ event: 'submit-recording', status: resp.status, fetchedUrl: resp.fetchedUrl, body: data, correlationId: this.correlationId });
+
+            if (!resp.ok) {
+                const msg = (data && data.message) ? data.message : `Upload failed (status=${resp.status})`;
+                this.showStatus('recordingStatus', msg, 'error');
+                submitBtn.disabled = false;
+                return;
+            }
+
+            if (data && (data.success === true || data.current_step || data.next_prompt)) {
+                this.currentStep = data.current_step || (this.currentStep + 1);
+                this.updateProgress(data.progress_percentage || ((this.currentStep / (this.currentSession.total_steps || 10)) * 100));
+                if (data.next_prompt) {
+                    this.updatePrompt(data.next_prompt);
+                    this.resetForNextRecording();
+                    this.showStatus('recordingStatus', `✅ Step ${this.currentStep - 1} uploaded. Next prompt loaded.`, 'success');
+                } else {
+                    this.showStatus('recordingStatus', '🎉 All steps completed — processing your voice profile...', 'success');
+                    document.getElementById('recordingSteps').style.display = 'none';
+                    this.loadUserProfiles();
+                }
+            } else {
+                const msg = (data && data.message) ? data.message : 'Server returned failure';
+                this.showStatus('recordingStatus', msg, 'error');
+                submitBtn.disabled = false;
+            }
+        } catch (err) {
+            console.error({ event: 'submitRecording:error', err, correlationId: this.correlationId });
+            if (err && err.name === 'AbortError') this.showStatus('recordingStatus','Upload timed out','error');
+            else this.showStatus('recordingStatus', `Upload error: ${err?.message || err}`, 'error');
+            submitBtn.disabled = false;
+        } finally {
+            setTimeout(()=> submitBtn.disabled = false, 1200);
+        }
+    }
+
+    // ---- profile listing / synthesis ----
+    async loadUserProfiles() {
+        try {
+            const resp = await this.fetchWithFallback(this.API_LIST_PROFILES_URLS, {
+                headers: this.genHeaders({ 'Accept': 'application/json' })
+            }, 15_000);
+            const ct = (resp.headers.get('Content-Type') || '').toLowerCase();
+            let data = null;
+            try {
+                if (ct.includes('application/json')) data = await resp.json();
+                else data = await resp.json().catch(async () => ({ raw: await resp.text() }));
+            } catch (e) {
+                data = { raw: await resp.text().catch(()=>null) };
+            }
+            console.debug({ event: 'loadUserProfiles', status: resp.status, fetchedUrl: resp.fetchedUrl, body: data, correlationId: this.correlationId });
+
+            if (!resp.ok) {
+                document.getElementById('profilesList').innerHTML = `<p>Failed to load profiles (${resp.status})</p>`;
+                return;
+            }
+
+            this.displayProfiles(data.profiles || []);
+            this.updateVoiceSelector(data.profiles || []);
+        } catch (err) {
+            console.error({ event: 'loadUserProfiles:error', err, correlationId: this.correlationId });
+            document.getElementById('profilesList').innerHTML = '<p>Failed to load profiles</p>';
+        }
+    }
+
+    displayProfiles(profiles) {
+        const container = document.getElementById('profilesList');
+        if (!profiles || profiles.length === 0) {
+            container.innerHTML = '<p>No voice profiles yet. Create your first one above!</p>';
+            return;
+        }
+        const items = profiles.map(p => {
+            const created = p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Unknown';
+            const status = p.status || 'processing';
+            const timesUsed = (p.times_used || 0);
+            const quality = p.quality || (status === 'ready' ? 'ready' : 'processing');
+            return `
+            <div class="profile-card" style="display:flex;justify-content:space-between;align-items:center;padding:10px;margin:8px 0;background:rgba(255,255,255,0.02);border-radius:8px;">
+                <div>
+                    <strong>${this.escapeHtml(p.profile_name || 'Untitled')}</strong><br>
+                    <small>Created: ${this.escapeHtml(created)}</small><br>
+                    <small>Status: ${this.escapeHtml(status)} | Used: ${timesUsed} times</small>
+                </div>
+                <div>
+                    <span style="padding:6px 10px;border-radius:12px;background:rgba(0,0,0,0.12)">${this.escapeHtml(quality)}</span>
+                    <button data-profile-id="${this.escapeHtml(p.profile_id)}" class="record-button delete-profile-btn" style="margin-left:10px;">🗑️</button>
+                </div>
+            </div>`;
+        }).join('');
+        container.innerHTML = items;
+
+        // attach delete handlers
+        document.querySelectorAll('.delete-profile-btn').forEach(btn => {
+            btn.addEventListener('click', (ev) => {
+                const id = btn.getAttribute('data-profile-id');
+                this.deleteProfile(id);
+            });
+        });
+    }
+
+    updateVoiceSelector(profiles) {
+        const selector = document.getElementById('voiceSelect');
+        selector.innerHTML = '<option value="">Select a voice profile...</option>';
+        (profiles || []).filter(p => p.status === 'ready').forEach(p => {
+            selector.innerHTML += `<option value="${this.escapeHtml(p.profile_id)}">${this.escapeHtml(p.profile_name)} (${this.escapeHtml(p.quality || 'ready')})</option>`;
+        });
+    }
+
+    // simple XSS-safe escape (for small uses here)
+    escapeHtml(s) {
+        if (!s && s !== 0) return '';
+        return String(s).replace(/[&<>"']/g, function (m) { return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[m]; });
+    }
+
+    async synthesizeWithVoice() {
+        const profileId = document.getElementById('voiceSelect')?.value;
+        const text = document.getElementById('synthesisText')?.value?.trim();
+        if (!profileId || !text) { this.showStatus('synthesisStatus','Please select a voice profile and enter text','error'); return; }
+        try {
+            document.getElementById('synthesizeBtn').disabled = true;
+            this.showStatus('synthesisStatus','🔄 Generating speech...','info');
+
+            const resp = await this.fetchWithFallback(this.API_USE_VOICE_URLS, {
+                method: 'POST',
+                headers: this.genHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }),
+                body: JSON.stringify({ profile_id: profileId, text, language: 'en' })
+            }, 30_000);
+
+            const ct = (resp.headers.get('Content-Type') || '').toLowerCase();
+            let data = null;
+            try { data = ct.includes('application/json') ? await resp.json() : await resp.json().catch(async ()=>({ raw: await resp.text() })); }
+            catch(e){ data = { raw: await resp.text().catch(()=>null) }; }
+
+            console.debug({ event: 'synthesize', status: resp.status, fetchedUrl: resp.fetchedUrl, body: data, correlationId: this.correlationId });
+            if (!resp.ok) {
+                this.showStatus('synthesisStatus', data?.message || `Synthesis failed (status ${resp.status})`, 'error');
+                return;
+            }
+
+            if (data && data.success && data.audio_file_path) {
+                const audioEl = document.getElementById('synthesisResult');
+                // prefer direct download route returned by server; else fallback to path tail
+                const url = data.audio_file_path.startsWith('/') ? data.audio_file_path : `/api/v1/download/${data.audio_file_path.split('/').pop()}`;
+                audioEl.src = url;
+                audioEl.style.display = 'block';
+                audioEl.play().catch(()=>{/* ignore autoplay restrictions */});
+                this.showStatus('synthesisStatus','🎉 Speech generated','success');
+            } else {
+                this.showStatus('synthesisStatus', data?.message || 'Failed to generate speech', 'error');
+            }
+        } catch (err) {
+            console.error({ event: 'synthesize:error', err, correlationId: this.correlationId });
+            if (err && err.name === 'AbortError') this.showStatus('synthesisStatus','Synthesis timed out','error');
+            else this.showStatus('synthesisStatus','Failed to generate speech','error');
+        } finally {
+            document.getElementById('synthesizeBtn').disabled = false;
+        }
+    }
+
+    async deleteProfile(profileId) {
+        if (!profileId) return;
+        if (!confirm('Are you sure you want to delete this profile? This cannot be undone.')) return;
+        try {
+            // try each base url with appended profile id
+            const urls = this.API_DELETE_PROFILE_URLS.map(base => `${base}/${encodeURIComponent(profileId)}`);
+            const resp = await this.fetchWithFallback(urls, { method: 'DELETE', headers: this.genHeaders() }, 12_000);
+            if (resp.ok) {
+                this.loadUserProfiles();
+            } else {
+                const ct = (resp.headers.get('Content-Type') || '').toLowerCase();
+                let data = null;
+                try { data = ct.includes('application/json') ? await resp.json() : await resp.text(); } catch(e) { data = { raw: 'unknown' }; }
+                alert(`Failed to delete profile: ${(data && data.message) ? data.message : `status ${resp.status}`}`);
+            }
+        } catch (err) {
+            console.error({ event: 'deleteProfile:error', err, correlationId: this.correlationId });
+            alert('Failed to delete profile (network)');
+        }
+    }
+
+    // ---- UI helpers ----
+    showRecordingSteps() {
+        document.getElementById('recordingSteps').style.display = 'block';
+        document.getElementById('recordBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        document.getElementById('playBtn').disabled = true;
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('promptCountdown').textContent = '';
+    }
+
+    updatePrompt(prompt) {
+        document.getElementById('currentPrompt').textContent = prompt;
+        this.clearPromptCountdown();
+    }
+
+    updateProgress(percentage) {
+        const pct = Math.max(0, Math.min(100, Math.round(percentage || 0)));
+        document.getElementById('progressFill').style.width = `${pct}%`;
+        document.getElementById('progressText').textContent = `Step ${this.currentStep} of ${this.currentSession?.total_steps || 10} (${pct}%)`;
+    }
+
+    updateRecordingButtons() {
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        if (recordBtn) recordBtn.disabled = this.isRecording;
+        if (stopBtn) stopBtn.disabled = !this.isRecording;
+        if (this.isRecording) recordBtn?.classList.add('recording'); else recordBtn?.classList.remove('recording');
+    }
+
+    resetForNextRecording() {
+        this.recordedBlob = null;
+        const audioEl = document.getElementById('audioPlayback');
+        if (audioEl) { audioEl.style.display = 'none'; audioEl.src = ''; }
+        document.getElementById('playBtn').disabled = true;
+        document.getElementById('submitBtn').disabled = true;
+        this.clearPromptCountdown();
+    }
+
+    showStatus(elementId, message, type) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        el.textContent = message;
+        el.className = `status ${type}`;
+        el.style.display = 'block';
+    }
+
+    getUserId() {
+        let uid = localStorage.getItem('userId');
+        if (!uid) { uid = `user_${Date.now()}`; localStorage.setItem('userId', uid); }
+        return uid;
+    }
+}
+
+// instantiate after DOM ready
+let recorder = null;
+window.addEventListener('DOMContentLoaded', () => {
+    recorder = new VoiceProfileRecorder();
+    window.recorder = recorder; // expose for debugging
+});
+</script>
+</body>
+</html>

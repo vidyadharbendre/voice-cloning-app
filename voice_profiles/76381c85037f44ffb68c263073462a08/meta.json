@@ -1,0 +1,24 @@
+{
+  "profile_id": "76381c85037f44ffb68c263073462a08",
+  "profile_name": "vidya9",
+  "owner": "user_5897",
+  "created_at": 1759259349.9278688,
+  "updated_at": 1759259349.9278688,
+  "total_steps": 10,
+  "current_step": 1,
+  "status": "recording",
+  "prompts": [
+    "Please say: The quick brown fox jumps over the lazy dog.",
+    "Please say: How razorback-jumping frogs can level six piqued gymnasts.",
+    "Please say: She sells seashells by the seashore.",
+    "Please say: Today is a nice day for a walk in the park.",
+    "Please say: The quick brown fox jumps over the lazy dog.",
+    "Please say: How razorback-jumping frogs can level six piqued gymnasts.",
+    "Please say: She sells seashells by the seashore.",
+    "Please say: Today is a nice day for a walk in the park.",
+    "Please say: The quick brown fox jumps over the lazy dog.",
+    "Please say: How razorback-jumping frogs can level six piqued gymnasts."
+  ],
+  "quality": "processing",
+  "times_used": 0
+}
