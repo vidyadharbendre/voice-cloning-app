@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtualenvs
+venv/
+.env
+.venv/
+.env.*
+
+# Editor / OS
+.DS_Store
+*.swp
+
+# Logs & runtime
+logs/
+*.log
+
+# Python version managers (personal)
+.python-version
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
