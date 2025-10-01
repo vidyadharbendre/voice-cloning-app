@@ -13,8 +13,16 @@ import os
 import logging
 from typing import Tuple, Optional
 
-import librosa
-import soundfile as sf
+try:  # pragma: no cover - optional dependency handling
+    import librosa  # type: ignore
+except Exception:  # pragma: no cover - noqa: BLE001 (broad to handle optional dep absence)
+    librosa = None  # type: ignore
+
+try:  # pragma: no cover - optional dependency handling
+    import soundfile as sf  # type: ignore
+except Exception:  # pragma: no cover - noqa: BLE001
+    sf = None  # type: ignore
+
 import numpy as np
 
 from app.interfaces.audio_processor_interface import IAudioProcessor
@@ -85,29 +93,34 @@ class AudioProcessor(IAudioProcessor):
                 logger.debug("Could not stat file '%s': %s", file_path, oe)
 
             # Load (librosa loads and resamples when sr is provided)
-            try:
-                audio_data, sr = librosa.load(file_path, sr=self.target_sr, mono=True)
-                if audio_data is None:
-                    raise AudioProcessingError("Librosa returned no audio data")
-                return audio_data, sr
-            except Exception as e:
-                logger.warning("librosa.load failed for %s: %s; falling back to soundfile", file_path, e)
-                # fallback to soundfile (will not resample)
+            if librosa is not None:
+                try:
+                    audio_data, sr = librosa.load(file_path, sr=self.target_sr, mono=True)
+                    if audio_data is None:
+                        raise AudioProcessingError("Librosa returned no audio data")
+                    return audio_data, sr
+                except Exception as e:  # pragma: no cover - depends on optional dependency
+                    logger.warning("librosa.load failed for %s: %s; falling back to soundfile", file_path, e)
+
+            # fallback to soundfile (will not resample)
+            if sf is not None:
                 try:
                     data, sr = sf.read(file_path, always_2d=False)
-                    # convert to mono if multi-channel
                     if data is None:
                         raise AudioProcessingError("soundfile.read returned no data")
                     if getattr(data, "ndim", 0) > 1:
-                        # convert to mono by averaging channels
                         data = np.mean(data, axis=1)
-                    # if sr != target_sr and librosa is available, resample
-                    if sr != self.target_sr and hasattr(librosa, "resample"):
-                        data = librosa.resample(np.asarray(data).astype("float32"), orig_sr=sr, target_sr=self.target_sr)
-                        sr = self.target_sr
-                    return data.astype("float32"), sr
-                except Exception as sf_exc:
-                    raise AudioProcessingError(f"Failed to load audio with both librosa and soundfile: {sf_exc}") from sf_exc
+                    if sr != self.target_sr:
+                        data, sr = self._resample_if_possible(data, sr)
+                    return np.asarray(data, dtype="float32"), sr
+                except Exception as sf_exc:  # pragma: no cover - depends on optional dependency
+                    raise AudioProcessingError(
+                        f"Failed to load audio with available backends: {sf_exc}"
+                    ) from sf_exc
+
+            raise AudioProcessingError(
+                "Audio loading dependencies are unavailable. Install 'librosa' or 'soundfile'."
+            )
 
         except AudioProcessingError:
             # re-raise domain-specific exceptions unchanged
@@ -172,7 +185,7 @@ class AudioProcessor(IAudioProcessor):
         """
         try:
             # Normalize audio to -1..1
-            audio_data = librosa.util.normalize(audio_data.astype("float32"))
+            audio_data = self._normalize_audio(audio_data.astype("float32"))
 
             # Apply basic noise gate
             audio_data = self._apply_noise_gate(audio_data)
@@ -190,3 +203,30 @@ class AudioProcessor(IAudioProcessor):
         except Exception as e:
             logger.debug("Noise gate failed: %s", e)
             return audio_data
+
+    def _normalize_audio(self, audio_data: np.ndarray) -> np.ndarray:
+        """Normalize audio data without requiring librosa."""
+        if librosa is not None and hasattr(librosa, "util"):
+            try:  # pragma: no cover - depends on optional dependency
+                return librosa.util.normalize(audio_data)
+            except Exception:
+                logger.debug("librosa normalization failed; falling back to numpy implementation")
+
+        peak = np.max(np.abs(audio_data)) if audio_data.size > 0 else 0.0
+        if peak == 0:
+            return audio_data
+        return audio_data / peak
+
+    def _resample_if_possible(self, audio_data: np.ndarray, source_sr: int) -> Tuple[np.ndarray, int]:
+        """Resample audio if a backend is available; otherwise return original data."""
+        if source_sr == self.target_sr:
+            return audio_data, source_sr
+
+        if librosa is not None and hasattr(librosa, "resample"):
+            try:  # pragma: no cover - depends on optional dependency
+                data = librosa.resample(np.asarray(audio_data, dtype="float32"), orig_sr=source_sr, target_sr=self.target_sr)
+                return data, self.target_sr
+            except Exception:
+                logger.debug("librosa.resample failed; returning original audio")
+
+        return audio_data, source_sr
